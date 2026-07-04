@@ -1,0 +1,25 @@
+<?php
+return [
+    'site_title' => 'Photo Gallery',
+    'admin_panel' => 'Admin Panel',
+    'dashboard' => 'Dashboard',
+    'albums' => 'Albums',
+    'categories' => 'Categories',
+    'settings' => 'Settings',
+    'login' => 'Login',
+    'logout' => 'Logout',
+    'username' => 'Username',
+    'password' => 'Password',
+    'email' => 'Email Address',
+    'submit' => 'Submit',
+    'save_changes' => 'Save Changes',
+    'about_us' => 'About Us',
+    'contact_us' => 'Contact Us',
+    'protected_album' => 'Protected Album',
+    'enter_email_access' => 'Please enter your email to access this album.',
+    'access_denied' => 'Access Denied! Your email is not authorized.',
+    'footer_text' => 'All Rights Reserved',
+    'name' => 'Name',
+    'message' => 'Message',
+    'send_message' => 'Send Message'
+];

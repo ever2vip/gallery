@@ -1,0 +1,159 @@
+-- =====================================================
+-- قاعدة بيانات معرض الصور - Photo Gallery Database
+-- =====================================================
+
+CREATE DATABASE IF NOT EXISTS photo_gallery CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE photo_gallery;
+
+-- جدول المستخدمين (المشرفين)
+CREATE TABLE IF NOT EXISTS admins (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100) DEFAULT NULL,
+    email VARCHAR(100) DEFAULT NULL,
+    role ENUM('super_admin', 'admin', 'editor') DEFAULT 'admin',
+    avatar VARCHAR(255) DEFAULT NULL,
+    is_active TINYINT(1) DEFAULT 1,
+    last_login DATETIME DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- جدول صلاحيات المشرفين (نظام صلاحيات مرن)
+CREATE TABLE IF NOT EXISTS admin_permissions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    admin_id INT NOT NULL,
+    permission_key VARCHAR(100) NOT NULL,
+    FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_permission (admin_id, permission_key)
+) ENGINE=InnoDB;
+
+-- جدول الألبومات
+CREATE TABLE IF NOT EXISTS albums (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    slug VARCHAR(220) NOT NULL UNIQUE,
+    description TEXT DEFAULT NULL,
+    cover_image VARCHAR(255) DEFAULT NULL,
+    password VARCHAR(255) DEFAULT NULL,
+    is_protected TINYINT(1) DEFAULT 0,
+    is_published TINYINT(1) DEFAULT 1,
+    is_featured TINYINT(1) DEFAULT 0,
+    sort_order INT DEFAULT 0,
+    views_count INT DEFAULT 0,
+    category_id INT DEFAULT NULL,
+    created_by INT DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES admins(id) ON DELETE SET NULL,
+    INDEX idx_slug (slug),
+    INDEX idx_published (is_published)
+) ENGINE=InnoDB;
+
+-- جدول التصنيفات
+CREATE TABLE IF NOT EXISTS categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    slug VARCHAR(120) NOT NULL UNIQUE,
+    description TEXT DEFAULT NULL,
+    sort_order INT DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+ALTER TABLE albums ADD CONSTRAINT fk_album_category
+    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL;
+
+-- جدول الصور
+CREATE TABLE IF NOT EXISTS photos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    album_id INT NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    original_name VARCHAR(255) DEFAULT NULL,
+    thumbnail VARCHAR(255) DEFAULT NULL,
+    title VARCHAR(200) DEFAULT NULL,
+    description TEXT DEFAULT NULL,
+    file_size INT DEFAULT NULL,
+    width INT DEFAULT NULL,
+    height INT DEFAULT NULL,
+    sort_order INT DEFAULT 0,
+    views_count INT DEFAULT 0,
+    downloads_count INT DEFAULT 0,
+    is_cover TINYINT(1) DEFAULT 0,
+    uploaded_by INT DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+    FOREIGN KEY (uploaded_by) REFERENCES admins(id) ON DELETE SET NULL,
+    INDEX idx_album (album_id)
+) ENGINE=InnoDB;
+
+-- جدول محاولات دخول الألبومات المحمية (سجل + حماية من brute force)
+CREATE TABLE IF NOT EXISTS album_access_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    album_id INT NOT NULL,
+    ip_address VARCHAR(45) NOT NULL,
+    success TINYINT(1) DEFAULT 0,
+    attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+    INDEX idx_album_ip (album_id, ip_address, attempted_at)
+) ENGINE=InnoDB;
+
+-- جدول التعليقات على الألبومات (يتطلب موافقة المشرف قبل الظهور للعامة)
+CREATE TABLE IF NOT EXISTS comments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    album_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) DEFAULT NULL,
+    comment TEXT NOT NULL,
+    is_approved TINYINT(1) DEFAULT 0,
+    ip_address VARCHAR(45) DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
+    INDEX idx_album_approved (album_id, is_approved)
+) ENGINE=InnoDB;
+
+-- جدول إعدادات الموقع العامة (قابلة للتعديل من لوحة التحكم)
+CREATE TABLE IF NOT EXISTS site_settings (
+    setting_key VARCHAR(100) PRIMARY KEY,
+    setting_value TEXT DEFAULT NULL,
+    setting_group VARCHAR(50) DEFAULT 'general',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- جدول سجل النشاطات (لتتبع كل تعديل يتم في لوحة التحكم)
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    admin_id INT DEFAULT NULL,
+    action VARCHAR(100) NOT NULL,
+    details TEXT DEFAULT NULL,
+    ip_address VARCHAR(45) DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- بيانات أولية
+-- =====================================================
+
+-- مستخدم مشرف افتراضي (اسم المستخدم: admin / كلمة المرور: Admin@12345)
+-- يُنصح بتغيير كلمة المرور فور تسجيل الدخول لأول مرة
+INSERT INTO admins (username, password, full_name, role, is_active) VALUES
+('admin', '$2b$12$XKR7T6vHChyXZ5G9SAJsuehuMTJ0JfONfD41WNj3qm/XF3lav3tUC', 'المدير العام', 'super_admin', 1);
+
+-- إعدادات افتراضية للموقع
+INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES
+('site_title', 'معرض الصور', 'general'),
+('site_description', 'معرض صور احترافي لعرض وتنظيم الألبومات', 'general'),
+('site_logo', '', 'general'),
+('accent_theme', 'gold', 'appearance'),
+('items_per_page', '12', 'general'),
+('allow_comments', '0', 'features'),
+('allow_downloads', '1', 'features'),
+('watermark_enabled', '0', 'features'),
+('max_login_attempts', '5', 'security'),
+('lockout_minutes', '15', 'security'),
+('footer_text', '© 2026 معرض الصور - جميع الحقوق محفوظة', 'general');
+
+-- تصنيف افتراضي
+INSERT INTO categories (name, slug, description) VALUES
+('عام', 'general', 'تصنيف عام للألبومات');
