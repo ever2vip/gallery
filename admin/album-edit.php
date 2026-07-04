@@ -31,6 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $isFeatured = isset($_POST['is_featured']) ? 1 : 0;
         $password = $_POST['password'] ?? '';
         $removePassword = isset($_POST['remove_password']);
+        $removeEmailProtection = isset($_POST['remove_email_protection']);
 
         if (empty($title)) {
             $errors[] = 'عنوان الألبوم مطلوب';
@@ -52,17 +53,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $data['remove_password'] = true;
             }
 
+            // تحديد الـ ID الحالي للتعامل مع الإدخال
+            $currentAlbumId = $albumId;
+
             if ($isEdit) {
                 $albumModel->update($albumId, $data);
                 logActivity('update_album', 'تعديل الألبوم: ' . $title);
-                redirectWithMessage('album-photos.php?id=' . $albumId, 'تم تحديث الألبوم بنجاح، يمكنك الآن إضافة الصور');
             } else {
-                $newId = $albumModel->create($data);
+                $currentAlbumId = $albumModel->create($data);
                 logActivity('create_album', 'إنشاء ألبوم جديد: ' . $title);
-                redirectWithMessage('album-photos.php?id=' . $newId, 'تم إنشاء الألبوم بنجاح، الآن قم بإضافة الصور');
+            }
+
+            // --- معالجة حماية الألبوم بملف الإكسيل (CSV) ---
+            if (isset($_FILES['allowed_emails_file']) && $_FILES['allowed_emails_file']['error'] === UPLOAD_ERR_OK) {
+                $fileTmpPath = $_FILES['allowed_emails_file']['tmp_name'];
+                $fileName = $_FILES['allowed_emails_file']['name'];
+                $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+
+                if ($fileExtension === 'csv') {
+                    // 1. تنظيف الإيميلات القديمة المرتبطة بهذا الألبوم
+                    $db->prepare("DELETE FROM album_allowed_emails WHERE album_id = ?")->execute([$currentAlbumId]);
+
+                    // 2. قراءة ملف الـ CSV وزرع الإيميلات
+                    if (($handle = fopen($fileTmpPath, "r")) !== FALSE) {
+                        $insert_stmt = $db->prepare("INSERT IGNORE INTO album_allowed_emails (album_id, email) VALUES (?, ?)");
+                        while (($row = fgetcsv($handle, 1000, ",")) !== FALSE) {
+                            $email = trim($row[0]);
+                            if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                                $insert_stmt->execute([$currentAlbumId, $email]);
+                            }
+                        }
+                        fclose($handle);
+
+                        // 3. تحديث حالة الألبوم ليكون محمياً
+                        $db->prepare("UPDATE albums SET is_protected = 1 WHERE id = ?")->execute([$currentAlbumId]);
+                    }
+                } else {
+                    $errors[] = 'الملف المرفوع غير صالح، يجب رفع ملف بتنسيق CSV فقط.';
+                }
+            }
+
+            // خيار إزالة حماية الإيميلات نهائياً
+            if ($isEdit && $removeEmailProtection) {
+                $db->prepare("DELETE FROM album_allowed_emails WHERE album_id = ?")->execute([$albumId]);
+                $db->prepare("UPDATE albums SET is_protected = 0 WHERE id = ?")->execute([$albumId]);
+            }
+
+            // توجيه المستخدم بعد نجاح العملية
+            if (empty($errors)) {
+                if ($isEdit) {
+                    redirectWithMessage('album-photos.php?id=' . $albumId, 'تم تحديث الألبوم بنجاح، يمكنك الآن إدارة الصور');
+                } else {
+                    redirectWithMessage('album-photos.php?id=' . $currentAlbumId, 'تم إنشاء الألبوم بنجاح، الآن قم بإضافة الصور');
+                }
             }
         }
     }
+}
+
+// التحقق من حالة حماية الإيميلات الحالية للألبوم في وضع التعديل
+$hasEmailProtection = false;
+if ($isEdit) {
+    $checkEmails = $db->prepare("SELECT COUNT(*) FROM album_allowed_emails WHERE album_id = ?");
+    $checkEmails->execute([$albumId]);
+    $hasEmailProtection = (bool) $checkEmails->fetchColumn();
 }
 
 $pageTitle = $isEdit ? 'تعديل ألبوم' : 'إنشاء ألبوم جديد';
@@ -77,7 +131,7 @@ require_once __DIR__ . '/includes/admin-header.php';
     </div>
 <?php endif; ?>
 
-<form method="post">
+<form method="post" enctype="multipart/form-data">
     <?= csrfField() ?>
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;">
         <div>
@@ -112,10 +166,36 @@ require_once __DIR__ . '/includes/admin-header.php';
 
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title"><i class="fa-solid fa-shield-halved" style="color:var(--color-gold-light);margin-left:8px;"></i>الحماية بكلمة مرور</span>
+                    <span class="card-title"><i class="fa-solid fa-file-excel" style="color:#1f7246;margin-left:8px;"></i>الحماية المتقدمة بقائمة الإيميلات</span>
                 </div>
 
-                <?php if ($isEdit && $album['is_protected']): ?>
+                <?php if ($isEdit && $hasEmailProtection): ?>
+                    <div class="alert alert-success" style="margin-bottom:18px;">
+                        <i class="fa-solid fa-user-shield"></i>
+                        <span>هذا الألبوم محمي حالياً بواسطة قائمة بريدية خاصة. رفع ملف جديد سيستبدل القائمة القديمة.</span>
+                    </div>
+                <?php endif; ?>
+
+                <div class="form-group">
+                    <label class="form-label">رفع قائمة الإيميلات المسموحة (ملف إكسيل بصيغة CSV)</label>
+                    <input type="file" name="allowed_emails_file" class="form-control" accept=".csv" style="padding: 10px;">
+                    <p class="form-hint">يجب أن يحتوي الملف على عمود واحد يضم البريد الإلكتروني للأشخاص المصرح لهم فقط بدخول الألبوم.</p>
+                </div>
+
+                <?php if ($isEdit && $hasEmailProtection): ?>
+                <div class="checkbox-wrapper" style="margin-top:14px;">
+                    <input type="checkbox" name="remove_email_protection" id="removeEmailProtection">
+                    <label for="removeEmailProtection" style="color: var(--color-danger, #dc3545); font-weight: bold;">إزالة الحماية بالقائمة البريدية نهائياً عن هذا الألبوم</label>
+                </div>
+                <?php endif; ?>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title"><i class="fa-solid fa-shield-halved" style="color:var(--color-gold-light);margin-left:8px;"></i>الحماية التقليدية بكلمة مرور</span>
+                </div>
+
+                <?php if ($isEdit && isset($album['password']) && !empty($album['password'])): ?>
                     <div class="alert alert-info" style="margin-bottom:18px;">
                         <i class="fa-solid fa-lock"></i>
                         <span>هذا الألبوم محمي حالياً بكلمة مرور. اترك الحقل فارغاً للإبقاء عليها، أو أدخل كلمة جديدة لتغييرها.</span>
@@ -123,17 +203,17 @@ require_once __DIR__ . '/includes/admin-header.php';
                 <?php endif; ?>
 
                 <div class="form-group">
-                    <label class="form-label"><?= ($isEdit && $album['is_protected']) ? 'تغيير كلمة المرور' : 'كلمة مرور الألبوم (اختياري)' ?></label>
+                    <label class="form-label"><?= ($isEdit && !empty($album['password'])) ? 'تغيير كلمة المرور' : 'كلمة مرور الألبوم (اختياري)' ?></label>
                     <div class="password-input-wrapper" style="position:relative;">
                         <input type="password" name="password" class="form-control" placeholder="اتركه فارغاً لعدم الحماية" style="padding-left:46px;">
                         <button type="button" class="password-toggle" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--color-silver-muted);cursor:pointer;">
                             <i class="fa-solid fa-eye"></i>
                         </button>
                     </div>
-                    <p class="form-hint">عند تعيين كلمة مرور، سيُطلب من الزوار إدخالها لمشاهدة محتوى الألبوم</p>
+                    <p class="form-hint">عند تعيين كلمة مرور، سيُطلب من الزوار إدخالها لمشاهدة محتوى الألبوم (تنويه: حماية الإيميلات تلغي حماية كلمة المرور تلقائياً)</p>
                 </div>
 
-                <?php if ($isEdit && $album['is_protected']): ?>
+                <?php if ($isEdit && !empty($album['password'])): ?>
                 <div class="checkbox-wrapper" style="margin-top:14px;">
                     <input type="checkbox" name="remove_password" id="removePassword">
                     <label for="removePassword">إزالة الحماية بكلمة المرور نهائياً عن هذا الألبوم</label>
