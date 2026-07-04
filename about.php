@@ -1,16 +1,23 @@
 <?php
+require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/functions.php';
-$pageTitle = 'من نحن';
-require_once __DIR__ . '/includes/header.php';
+
+// جلب النص بناءً على لغة السيرفر الحالية المحددة في الجلسة (SITE_LANG)
+$aboutContent = (SITE_LANG === 'ar') 
+    ? getSetting('about_text_ar', 'معلومات عنا باللغة العربية...') 
+    : getSetting('about_text_en', 'About us in English...');
+
+$pageTitle = __('about_us');
+include __DIR__ . '/includes/header.php';
 ?>
 
-<section style="padding: 30px 0 60px;max-width:800px;margin:0 auto;">
-    <h1 class="section-title">من <span class="gold-text">نحن</span></h1>
-
-    <div style="background:linear-gradient(145deg,#1a1a1e,#131316);border:1px solid rgba(212,175,55,0.1);border-radius:22px;padding:40px;margin-top:30px;line-height:2;color:var(--color-silver-dim);">
-        <p style="margin-bottom:20px;"><?= e(getSetting('site_description', 'معرض صور احترافي مخصص لعرض وتنظيم الألبومات بأناقة وسهولة.')) ?></p>
-        <p>نوفر لك تجربة عرض بصرية استثنائية مع إمكانية حماية ألبوماتك الخاصة بكلمة مرور، لضمان أن تبقى لحظاتك الثمينة محفوظة وآمنة كما تريد.</p>
+<div class="container my-5">
+    <div class="card p-5 shadow-sm border-0">
+        <h2 class="mb-4 text-center"><i class="fa-solid fa-address-card text-primary"></i> <?= __('about_us') ?></h2>
+        <div class="about-text-zone" style="line-height: 1.8; font-size: 1.1rem; color: #444;">
+            <?= nl2br(e($aboutContent)) ?>
+        </div>
     </div>
-</section>
+</div>
 
-<?php require_once __DIR__ . '/includes/footer.php'; ?>
+<?php include __DIR__ . '/includes/footer.php'; ?>
